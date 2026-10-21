@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Lock } from "@/lib/matcher/matcher";
-import type { CheckRecord, Project, PublicUser } from "@/lib/store/types";
+import type {
+  CheckRecord,
+  Project,
+  PublicApiKey,
+  PublicUser,
+} from "@/lib/store/types";
 import { reportToJson, reportToMarkdown } from "@/lib/report";
 
 const SCENE_ALLOW = [
@@ -117,6 +122,9 @@ export default function CheckPage() {
   const [user, setUser] = useState<PublicUser | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
+  const [apiKeys, setApiKeys] = useState<PublicApiKey[]>([]);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [createdSecret, setCreatedSecret] = useState<string | null>(null);
 
   const loadProject = useCallback(async (id: string) => {
     const data = await api<{ project: Project; checks: CheckRecord[] }>(
@@ -151,6 +159,20 @@ export default function CheckPage() {
       .then((data) => setUser(data.user))
       .catch(() => setUser(null));
   }, []);
+
+  const loadKeys = useCallback(async () => {
+    const data = await api<{ keys: PublicApiKey[] }>("/api/keys");
+    setApiKeys(data.keys);
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      loadKeys().catch(() => setApiKeys([]));
+    } else {
+      setApiKeys([]);
+      setCreatedSecret(null);
+    }
+  }, [user, loadKeys]);
 
   async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
     setBusy(true);
@@ -201,6 +223,39 @@ export default function CheckPage() {
     setUser(null);
     await refreshProjects();
     setNotice("Signed out. You are viewing the public demo project again.");
+  }
+
+  async function createKey() {
+    if (newKeyName.trim().length === 0) {
+      setError("Give the key a name first");
+      return;
+    }
+    const res = await run(() =>
+      api<{ key: PublicApiKey; secret: string }>("/api/keys", {
+        method: "POST",
+        body: JSON.stringify({ name: newKeyName }),
+      })
+    );
+    if (res) {
+      setNewKeyName("");
+      // The secret is shown exactly once, right here. Only its hash
+      // is stored, so it cannot be recovered later.
+      setCreatedSecret(res.secret);
+      await loadKeys();
+    }
+  }
+
+  async function revokeKey(key: PublicApiKey) {
+    if (!window.confirm(`Revoke API key "${key.name}"? It stops working immediately.`)) {
+      return;
+    }
+    const res = await run(() =>
+      api<{ revoked: boolean }>(`/api/keys/${key.id}`, { method: "DELETE" })
+    );
+    if (res) {
+      await loadKeys();
+      setNotice(`API key "${key.name}" revoked.`);
+    }
   }
 
   async function createProject() {
@@ -305,8 +360,9 @@ export default function CheckPage() {
         {user ? (
           <div className="row-actions" style={{ alignItems: "center" }}>
             <span>
-              Signed in as <strong>{user.email}</strong>. Your projects are
-              yours alone: nobody else can read or change them.
+              Signed in as <strong>{user.email}</strong> (plan:{" "}
+              <strong>{user.tier}</strong>). Your projects are yours alone:
+              nobody else can read or change them.
             </span>
             <button
               className="action secondary"
@@ -353,6 +409,79 @@ export default function CheckPage() {
           </>
         )}
       </div>
+
+      {user && (
+        <div className="panel" style={{ marginBottom: "1.25rem" }}>
+          <h2 style={{ marginTop: 0 }}>API keys</h2>
+          <p style={{ color: "var(--ink-soft)", fontSize: "0.94rem" }}>
+            Keys authenticate the public API endpoint{" "}
+            <strong>POST /v1/check</strong> (see the README for the request
+            format). A key is shown once, at creation; only its hash is
+            stored, so a lost key cannot be recovered, only revoked and
+            replaced. Revoking takes effect immediately.
+          </p>
+          {createdSecret && (
+            <div className="privacy-note" style={{ marginBottom: "1rem" }}>
+              <strong>Your new API key (shown once, copy it now):</strong>
+              <div
+                className="evidence"
+                style={{ wordBreak: "break-all", marginTop: "0.35rem" }}
+              >
+                {createdSecret}
+              </div>
+              <button
+                className="mini"
+                style={{ marginTop: "0.5rem" }}
+                onClick={() => setCreatedSecret(null)}
+              >
+                I have copied it, hide it
+              </button>
+            </div>
+          )}
+          {apiKeys.length === 0 && (
+            <p style={{ color: "var(--ink-soft)" }}>No API keys yet.</p>
+          )}
+          {apiKeys.map((k) => (
+            <div className="history-item" key={k.id}>
+              <strong>{k.name}</strong>{" "}
+              <span className="evidence">{k.prefix}...</span>{" "}
+              {k.revoked ? (
+                <span className="result-tag result-BROKEN">Revoked</span>
+              ) : (
+                <span className="result-tag result-HOLDS">Active</span>
+              )}
+              <div className="meta">
+                Created {new Date(k.createdAt).toLocaleString()}
+                {" · "}
+                {k.lastUsedAt
+                  ? `Last used ${new Date(k.lastUsedAt).toLocaleString()}`
+                  : "Never used"}
+              </div>
+              {!k.revoked && (
+                <button
+                  className="mini"
+                  onClick={() => revokeKey(k)}
+                  disabled={busy}
+                >
+                  Revoke
+                </button>
+              )}
+            </div>
+          ))}
+          <div className="row-actions" style={{ marginTop: "0.75rem" }}>
+            <input
+              type="text"
+              placeholder="Key name, e.g. CI pipeline"
+              value={newKeyName}
+              onChange={(e) => setNewKeyName(e.target.value)}
+              aria-label="New API key name"
+            />
+            <button className="action" onClick={createKey} disabled={busy}>
+              Create API key
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && <div className="error-box">{error}</div>}
       {notice && (
