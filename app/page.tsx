@@ -57,7 +57,7 @@ export default function HomePage() {
             <h3>2. Paste the scene</h3>
             <p>
               Drop in the regenerated draft, a rewrite, or a fresh generation.
-              The scene is processed in memory and is never stored by default.
+              The scene is processed in memory and is never stored.
             </p>
           </div>
           <div className="card">

@@ -33,7 +33,7 @@ export default function RootLayout({
         <footer className="site-footer">
           <p>
             Canon Lock Cloud. Deterministic continuity checks: no AI in the
-            verdict path, and scene text is never stored by default.
+            verdict path, and scene text is never stored.
           </p>
         </footer>
       </body>
