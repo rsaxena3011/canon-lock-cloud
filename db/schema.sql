@@ -55,7 +55,19 @@ CREATE TABLE IF NOT EXISTS audit_log (
   user_id TEXT,
   project_id TEXT,
   verdict TEXT,
-  status_code INTEGER NOT NULL
+  status_code INTEGER NOT NULL,
+  event TEXT
+);
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS event TEXT;
+CREATE TABLE IF NOT EXISTS billing_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  tier TEXT NOT NULL,
+  price_cents INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
@@ -63,3 +75,4 @@ CREATE INDEX IF NOT EXISTS idx_checks_project ON checks(project_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_billing_sessions_user ON billing_sessions(user_id);

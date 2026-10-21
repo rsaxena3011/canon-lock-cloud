@@ -191,6 +191,7 @@ const LOCK: Lock = {
   });
   check(entry.verdict === "BLOCK" && entry.projectId === "p1", "audit-entry-round-trip");
   check(!("scene" in entry), "audit-entry-has-no-scene-field");
+  check(entry.event === null, "audit-entry-event-defaults-null");
   check((await store.listAuditEntries(owner.id)).length === 1, "audit-list-owner");
   check((await store.listAuditEntries(other.id)).length === 0, "audit-list-other-empty");
 }

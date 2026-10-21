@@ -40,7 +40,7 @@ export async function handleV1Check(
     statusCode: number,
     verdict: Verdict | null
   ): Promise<void> => {
-    await store.addAuditEntry({ ...ctx, verdict, statusCode });
+    await store.addAuditEntry({ ...ctx, verdict, statusCode, event: "api_check" });
   };
   const fail = async (
     ctx: AuditContext,

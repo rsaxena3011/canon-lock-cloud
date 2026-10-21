@@ -34,6 +34,7 @@ class FakePool implements PgQueryable {
   private checks: Row[] = [];
   private apiKeys = new Map<string, Row>();
   private audit: Row[] = [];
+  private billingSessions = new Map<string, Row>();
   private seq = 0;
 
   async query(
@@ -203,9 +204,38 @@ class FakePool implements PgQueryable {
         project_id: p[4],
         verdict: p[5],
         status_code: p[6],
+        event: p[7] ?? null,
         _seq: ++this.seq,
       };
       this.audit.push(row);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (sql.startsWith("INSERT INTO billing_sessions")) {
+      const row: Row = {
+        id: p[0],
+        user_id: p[1],
+        tier: p[2],
+        price_cents: p[3],
+        status: p[4],
+        created_at: p[5],
+        updated_at: p[6],
+        completed_at: p[7],
+      };
+      this.billingSessions.set(p[0] as string, row);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (sql.includes("FROM billing_sessions WHERE id")) {
+      const row = this.billingSessions.get(p[0] as string);
+      return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
+    }
+    if (sql.startsWith("UPDATE billing_sessions")) {
+      const row = this.billingSessions.get(p[0] as string);
+      if (!row) return empty;
+      row.status = p[1];
+      row.updated_at = p[2];
+      if (p[1] === "complete" && !row.completed_at) {
+        row.completed_at = p[2];
+      }
       return { rows: [row], rowCount: 1 };
     }
     if (sql.includes("FROM audit_log WHERE user_id")) {
@@ -352,8 +382,61 @@ check(true, "schema-applies-against-pool");
   });
   check(e1.statusCode === 200 && e1.verdict === "ALLOW", "pg-audit-entry-written");
   check(!("scene" in e1) && !("key" in e1), "pg-audit-entry-has-no-scene-or-key");
+  check(e1.event === null, "pg-audit-entry-event-defaults-null");
   const entries = await store.listAuditEntries(free!.id);
   check(entries.length === 1 && entries[0].id === e1.id, "pg-audit-listed-for-owner-only");
+}
+
+// Billing sessions and audit events: same semantics as in-memory.
+{
+  const buyer = (await store.createUser("buyer@pg.dev", "h"))!;
+  const now = new Date().toISOString();
+  const session = await store.createBillingSession({
+    id: "bs1",
+    userId: buyer.id,
+    tier: "Studio",
+    priceCents: 4900,
+    status: "open",
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
+  });
+  check(session.status === "open" && session.priceCents === 4900, "pg-billing-session-created");
+  check((await store.getBillingSession("bs1"))?.tier === "Studio", "pg-billing-session-round-trip");
+  check((await store.getBillingSession("missing")) === undefined, "pg-billing-session-missing");
+
+  const completed = await store.setBillingSessionStatus("bs1", "complete");
+  check(completed?.status === "complete", "pg-billing-session-completed");
+  check(completed?.completedAt !== null, "pg-billing-session-completed-at-stamped");
+  check(
+    (await store.setBillingSessionStatus("missing", "complete")) === undefined,
+    "pg-billing-session-status-missing"
+  );
+
+  const s2 = await store.createBillingSession({
+    id: "bs2",
+    userId: buyer.id,
+    tier: "Writer",
+    priceCents: 1200,
+    status: "open",
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
+  });
+  const cancelled = await store.setBillingSessionStatus(s2.id, "cancelled");
+  check(cancelled?.status === "cancelled" && cancelled?.completedAt === null, "pg-billing-session-cancelled");
+
+  const billed = await store.addAuditEntry({
+    keyId: null,
+    userId: buyer.id,
+    projectId: null,
+    verdict: null,
+    statusCode: 200,
+    event: "billing_checkout_complete",
+  });
+  check(billed.event === "billing_checkout_complete", "pg-audit-event-round-trip");
+  const entries = await store.listAuditEntries(buyer.id);
+  check(entries[0]?.event === "billing_checkout_complete", "pg-audit-event-listed");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

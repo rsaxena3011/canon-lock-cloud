@@ -112,6 +112,10 @@ export interface AuditEntry {
   projectId: string | null;
   verdict: Verdict | null; // null when no check ran (auth/validation failure)
   statusCode: number;
+  // What kind of event this row records: "api_check" for public API
+  // calls, "billing_checkout_complete" / "billing_plan_cancelled" for
+  // billing events, null for rows written before the column existed.
+  event: string | null;
 }
 
 export interface NewAuditEntry {
@@ -120,6 +124,36 @@ export interface NewAuditEntry {
   projectId: string | null;
   verdict: Verdict | null;
   statusCode: number;
+  event?: string | null;
+}
+
+/** Project-creation limit per tier. Enforced by the projects route. */
+export const TIER_PROJECT_LIMITS: Record<Tier, number> = {
+  Free: 1,
+  Writer: 10,
+  Studio: Number.POSITIVE_INFINITY,
+};
+
+export type BillingStatus = "open" | "complete" | "cancelled";
+
+/**
+ * One test-mode checkout session for a tier upgrade. Created by the
+ * billing provider (lib/billing), paid on the in-app checkout page,
+ * and completed server-side only: a session can upgrade its owner's
+ * tier only while it is still "open" and only for its owner. The id
+ * is a random UUID, unguessable, and acts as the capability token for
+ * the checkout page. No card data is ever stored here or anywhere
+ * else: test mode takes no real payment.
+ */
+export interface BillingSession {
+  id: string;
+  userId: string; // the account upgrading
+  tier: Tier; // the tier being purchased
+  priceCents: number; // price captured at creation, USD cents
+  status: BillingStatus;
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+  completedAt: string | null; // ISO 8601 once status is "complete"
 }
 
 /**
@@ -180,4 +214,13 @@ export interface Store {
   // or raw keys (see AuditEntry).
   addAuditEntry(entry: NewAuditEntry): Promise<AuditEntry>;
   listAuditEntries(userId: string, limit?: number): Promise<AuditEntry[]>;
+
+  // Test-mode billing sessions (see BillingSession). Status changes
+  // stamp updatedAt, and completing stamps completedAt.
+  createBillingSession(session: BillingSession): Promise<BillingSession>;
+  getBillingSession(id: string): Promise<BillingSession | undefined>;
+  setBillingSessionStatus(
+    id: string,
+    status: BillingStatus
+  ): Promise<BillingSession | undefined>;
 }

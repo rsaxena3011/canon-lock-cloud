@@ -5,6 +5,8 @@ import type { Store } from "./types";
 export type {
   ApiKey,
   AuditEntry,
+  BillingSession,
+  BillingStatus,
   CheckRecord,
   NewAuditEntry,
   NewCheck,
@@ -16,6 +18,7 @@ export type {
   Tier,
   User,
 } from "./types";
+export { TIER_PROJECT_LIMITS } from "./types";
 export { toPublicApiKey } from "./types";
 
 // One store per server process, created lazily and seeded with the

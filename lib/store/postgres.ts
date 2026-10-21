@@ -3,6 +3,8 @@ import type { Lock } from "../matcher/matcher.ts";
 import type {
   ApiKey,
   AuditEntry,
+  BillingSession,
+  BillingStatus,
   CheckRecord,
   NewAuditEntry,
   NewCheck,
@@ -83,7 +85,19 @@ CREATE TABLE IF NOT EXISTS audit_log (
   user_id TEXT,
   project_id TEXT,
   verdict TEXT,
-  status_code INTEGER NOT NULL
+  status_code INTEGER NOT NULL,
+  event TEXT
+);
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS event TEXT;
+CREATE TABLE IF NOT EXISTS billing_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  tier TEXT NOT NULL,
+  price_cents INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
@@ -91,6 +105,7 @@ CREATE INDEX IF NOT EXISTS idx_checks_project ON checks(project_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_billing_sessions_user ON billing_sessions(user_id);
 `;
 
 /** The slice of a pg Pool this adapter uses. Tests inject a fake. */
@@ -139,6 +154,20 @@ function toAuditEntry(row: Row): AuditEntry {
     projectId: (row.project_id as string | null) ?? null,
     verdict: (row.verdict as AuditEntry["verdict"]) ?? null,
     statusCode: row.status_code as number,
+    event: (row.event as string | null) ?? null,
+  };
+}
+
+function toBillingSession(row: Row): BillingSession {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    tier: row.tier as Tier,
+    priceCents: row.price_cents as number,
+    status: row.status as BillingStatus,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+    completedAt: row.completed_at ? iso(row.completed_at) : null,
   };
 }
 
@@ -185,7 +214,9 @@ const CHECK_COLS = "id, project_id, verdict, banner, rows, created_at";
 const API_KEY_COLS =
   "id, user_id, name, key_hash, prefix, created_at, last_used_at, revoked";
 const AUDIT_COLS =
-  "id, created_at, key_id, user_id, project_id, verdict, status_code";
+  "id, created_at, key_id, user_id, project_id, verdict, status_code, event";
+const BILLING_COLS =
+  "id, user_id, tier, price_cents, status, created_at, updated_at, completed_at";
 
 export class PostgresStore implements Store {
   private pool: PgQueryable;
@@ -418,8 +449,8 @@ export class PostgresStore implements Store {
 
   async addAuditEntry(entry: NewAuditEntry): Promise<AuditEntry> {
     const { rows } = await this.pool.query(
-      `INSERT INTO audit_log (id, created_at, key_id, user_id, project_id, verdict, status_code)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO audit_log (id, created_at, key_id, user_id, project_id, verdict, status_code, event)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING ${AUDIT_COLS}`,
       [
         crypto.randomUUID(),
@@ -429,6 +460,7 @@ export class PostgresStore implements Store {
         entry.projectId,
         entry.verdict,
         entry.statusCode,
+        entry.event ?? null,
       ]
     );
     return toAuditEntry(rows[0]);
@@ -443,5 +475,54 @@ export class PostgresStore implements Store {
       [userId, limit]
     );
     return rows.map(toAuditEntry);
+  }
+
+  async createBillingSession(
+    session: BillingSession
+  ): Promise<BillingSession> {
+    const { rows } = await this.pool.query(
+      `INSERT INTO billing_sessions (id, user_id, tier, price_cents, status, created_at, updated_at, completed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING ${BILLING_COLS}`,
+      [
+        session.id,
+        session.userId,
+        session.tier,
+        session.priceCents,
+        session.status,
+        session.createdAt,
+        session.updatedAt,
+        session.completedAt,
+      ]
+    );
+    return toBillingSession(rows[0]);
+  }
+
+  async getBillingSession(
+    id: string
+  ): Promise<BillingSession | undefined> {
+    const { rows } = await this.pool.query(
+      `SELECT ${BILLING_COLS} FROM billing_sessions WHERE id = $1`,
+      [id]
+    );
+    return rows[0] ? toBillingSession(rows[0]) : undefined;
+  }
+
+  async setBillingSessionStatus(
+    id: string,
+    status: BillingStatus
+  ): Promise<BillingSession | undefined> {
+    const now = new Date().toISOString();
+    const { rows } = await this.pool.query(
+      `UPDATE billing_sessions
+       SET status = $2, updated_at = $3,
+           completed_at = CASE WHEN $2 = 'complete'
+                               THEN COALESCE(completed_at, $3)
+                               ELSE completed_at END
+       WHERE id = $1
+       RETURNING ${BILLING_COLS}`,
+      [id, status, now]
+    );
+    return rows[0] ? toBillingSession(rows[0]) : undefined;
   }
 }

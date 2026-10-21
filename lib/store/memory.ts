@@ -2,6 +2,8 @@ import type { Lock } from "../matcher/matcher.ts";
 import type {
   ApiKey,
   AuditEntry,
+  BillingSession,
+  BillingStatus,
   CheckRecord,
   NewAuditEntry,
   NewCheck,
@@ -56,6 +58,7 @@ export class InMemoryStore implements Store {
   private apiKeys = new Map<string, ApiKey>(); // by id
   private apiKeyIdsByHash = new Map<string, string>();
   private audit: AuditEntry[] = [];
+  private billingSessions = new Map<string, BillingSession>(); // by id
 
   async createUser(
     email: string,
@@ -210,7 +213,12 @@ export class InMemoryStore implements Store {
     const row: AuditEntry = {
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
-      ...entry,
+      keyId: entry.keyId,
+      userId: entry.userId,
+      projectId: entry.projectId,
+      verdict: entry.verdict,
+      statusCode: entry.statusCode,
+      event: entry.event ?? null,
     };
     this.audit.push(row);
     return { ...row };
@@ -225,5 +233,34 @@ export class InMemoryStore implements Store {
       .slice(-limit)
       .reverse()
       .map((e) => ({ ...e }));
+  }
+
+  async createBillingSession(
+    session: BillingSession
+  ): Promise<BillingSession> {
+    this.billingSessions.set(session.id, { ...session });
+    return { ...session };
+  }
+
+  async getBillingSession(
+    id: string
+  ): Promise<BillingSession | undefined> {
+    const session = this.billingSessions.get(id);
+    return session ? { ...session } : undefined;
+  }
+
+  async setBillingSessionStatus(
+    id: string,
+    status: BillingStatus
+  ): Promise<BillingSession | undefined> {
+    const session = this.billingSessions.get(id);
+    if (!session) return undefined;
+    const now = new Date().toISOString();
+    session.status = status;
+    session.updatedAt = now;
+    if (status === "complete" && session.completedAt === null) {
+      session.completedAt = now;
+    }
+    return { ...session };
   }
 }
