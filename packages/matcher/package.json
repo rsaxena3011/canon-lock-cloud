@@ -1,1 +1,0 @@
-{"description":"Canon Lock deterministic matcher — TypeScript port of PRD rev. 3 reference implementation","license":"MIT","main":"dist/matcher.js","name":"@canon-lock/matcher","scripts":{"build":"tsc","test":"tsc && node dist/test/smoke.js"},"types":"dist/matcher.d.ts","version":"0.1.0"}
