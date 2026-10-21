@@ -137,7 +137,7 @@ async function accountWithKey(tier?: "Free" | "Writer" | "Studio") {
 
 // 3. /v1/check with ad-hoc locks: happy path plus validation rules.
 {
-  const { store, secret } = await accountWithKey();
+  const { store, secret } = await accountWithKey("Studio");
   const ok = await handleV1Check(store, limiter(), secret, {
     locks: [LOCK],
     scene: SCENE_ALLOW,
@@ -177,7 +177,7 @@ async function accountWithKey(tier?: "Free" | "Writer" | "Studio") {
 
 // 4. Auth failures at the handler: bad key and revoked key both 401.
 {
-  const { store, user, key, secret } = await accountWithKey();
+  const { store, user, key, secret } = await accountWithKey("Studio");
   const bad = await handleV1Check(store, limiter(), "clc_live_nope", {
     locks: [LOCK],
     scene: SCENE_ALLOW,
@@ -205,7 +205,7 @@ async function accountWithKey(tier?: "Free" | "Writer" | "Studio") {
 
 // 5. Rate limit: the call past the cap answers 429 with a JSON error.
 {
-  const { store, user, secret } = await accountWithKey();
+  const { store, user, secret } = await accountWithKey("Studio");
   const tiny = new FixedWindowRateLimiter(2, 60_000);
   const first = await handleV1Check(store, tiny, secret, {
     locks: [LOCK],
@@ -235,7 +235,7 @@ async function accountWithKey(tier?: "Free" | "Writer" | "Studio") {
 
 // 6. Audit log: entries carry metadata and verdicts, never scene text.
 {
-  const { store, user, secret } = await accountWithKey();
+  const { store, user, secret } = await accountWithKey("Studio");
   const project = await store.createProject("Audited", user.id);
   await store.setLocks(project.id, [LOCK]);
   await handleV1Check(store, limiter(), secret, {
@@ -261,6 +261,35 @@ async function accountWithKey(tier?: "Free" | "Writer" | "Studio") {
     !JSON.stringify(entries).includes(secret),
     "audit-entries-contain-no-raw-key"
   );
+}
+
+// 7. Plan gate (defect #14): API access is a Studio entitlement.
+//    Free and Writer keys authenticate but are refused with 403, and
+//    the refusal is audited. A Studio key on the same store passes.
+{
+  const free = await accountWithKey("Free");
+  const outFree = await handleV1Check(free.store, limiter(), free.secret, {
+    locks: [LOCK],
+    scene: SCENE_ALLOW,
+  });
+  check(outFree.status === 403, "v1-free-tier-key-403");
+  check(
+    typeof outFree.body.error === "string" &&
+      outFree.body.error.includes("Studio"),
+    "v1-free-tier-403-names-studio"
+  );
+  const freeEntries = await free.store.listAuditEntries(free.user.id);
+  check(
+    freeEntries.some((e) => e.statusCode === 403),
+    "v1-free-tier-403-audited"
+  );
+
+  const writer = await accountWithKey("Writer");
+  const outWriter = await handleV1Check(writer.store, limiter(), writer.secret, {
+    locks: [LOCK],
+    scene: SCENE_ALLOW,
+  });
+  check(outWriter.status === 403, "v1-writer-tier-key-403");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

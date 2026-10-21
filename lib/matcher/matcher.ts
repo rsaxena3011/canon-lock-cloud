@@ -36,7 +36,7 @@ export interface CheckResult {
 
 function normalize(s: string): string {
   s = s.normalize("NFC");
-  s = s.replace(/[""]/g, '"').replace(/['']/g, "'");
+  s = s.replace(/[\u201C\u201D\u201E]/g, '"').replace(/[\u2018\u2019\u02BC\u201B]/g, "'");
   s = s.toLowerCase();
   // 7.4: n't handled at the character level, before tokenizing.
   s = s.replace(/n't\b/g, " not");

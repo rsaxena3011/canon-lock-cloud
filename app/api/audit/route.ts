@@ -12,6 +12,14 @@ export async function GET(req: Request) {
   if (!user) {
     return NextResponse.json({ error: "Sign in first" }, { status: 401 });
   }
+  // Plan gate: the audit log view is a Studio entitlement, same gate
+  // as key creation and /v1/check. Defect #14.
+  if (user.tier !== "Studio") {
+    return NextResponse.json(
+      { error: "The audit log is a Studio plan feature" },
+      { status: 403 }
+    );
+  }
   const rawLimit = Number(new URL(req.url).searchParams.get("limit"));
   const limit =
     Number.isFinite(rawLimit) && rawLimit > 0

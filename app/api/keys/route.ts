@@ -23,6 +23,15 @@ export async function POST(req: Request) {
   if (!user) {
     return NextResponse.json({ error: "Sign in first" }, { status: 401 });
   }
+  // Plan gate: API keys are a Studio entitlement. Enforced here at
+  // creation and again in the /v1/check handler, so the gate the
+  // pricing page describes is the gate the system runs. Defect #14.
+  if (user.tier !== "Studio") {
+    return NextResponse.json(
+      { error: "API keys are a Studio plan feature" },
+      { status: 403 }
+    );
+  }
   let body: unknown;
   try {
     body = await req.json();

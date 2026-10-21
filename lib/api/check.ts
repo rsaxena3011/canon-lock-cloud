@@ -70,6 +70,17 @@ export async function handleV1Check(
   const { key, user } = auth;
   const ctx: AuditContext = { keyId: key.id, userId: user.id, projectId: null };
 
+  // 1b. Plan gate: API access is a Studio entitlement, enforced here
+  // (and at key creation in app/api/keys/route.ts), not just described
+  // in the pricing copy. A key created before a downgrade, or carried
+  // over from a trial, stops working the moment the account leaves
+  // Studio. Defect #14 (Sol review, 2026-10-22).
+  if (user.tier !== "Studio") {
+    return fail(ctx, 403, "API access requires the Studio plan", {
+      tier: user.tier,
+    });
+  }
+
   // 2. Rate limit, per key, before any real work happens.
   const rate = limiter.hit(key.id);
   if (!rate.allowed) {

@@ -72,6 +72,25 @@ function check(ok: boolean, label: string) {
   check(r.verdict === "BLOCK", "negated-must-stay-block");
 }
 
+// 4b. Negation with a typographic (curly) apostrophe -> BLOCK, same as
+//     the straight-apostrophe case. Regression for defect #15: word
+//     processors emit U+2019, and normalize() must fold it to ASCII
+//     before the n't handling, or the negation is silently missed.
+{
+  const lines = SCENE_A.split("\n");
+  lines[9] = "Meera sets the glass down between them. It isn\u2019t empty.";
+  const r = checkScene(lines.join("\n"), [GLASS]);
+  check(r.verdict === "BLOCK", "negated-must-stay-block-curly-apostrophe");
+}
+
+// 4c. Curly double quotes around dialogue must not change verdicts.
+{
+  const lines = SCENE_A.split("\n");
+  lines[9] = "Meera sets the glass down. \u201CIt isn\u2019t empty,\u201D she says.";
+  const r = checkScene(lines.join("\n"), [GLASS]);
+  check(r.verdict === "BLOCK", "curly-quotes-negation-block");
+}
+
 // 5. Mention without settle -> REVIEW
 {
   const lines = SCENE_A.split("\n");
