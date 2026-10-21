@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Lock } from "@/lib/matcher/matcher";
-import type { CheckRecord, Project } from "@/lib/store/types";
+import type { CheckRecord, Project, PublicUser } from "@/lib/store/types";
 import { reportToJson, reportToMarkdown } from "@/lib/report";
 
 const SCENE_ALLOW = [
@@ -114,6 +114,9 @@ export default function CheckPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [user, setUser] = useState<PublicUser | null>(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
 
   const loadProject = useCallback(async (id: string) => {
     const data = await api<{ project: Project; checks: CheckRecord[] }>(
@@ -143,6 +146,12 @@ export default function CheckPage() {
     refreshProjects().catch((e: Error) => setError(e.message));
   }, [refreshProjects]);
 
+  useEffect(() => {
+    api<{ user: PublicUser | null }>("/api/auth/me")
+      .then((data) => setUser(data.user))
+      .catch(() => setUser(null));
+  }, []);
+
   async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
     setBusy(true);
     setError(null);
@@ -155,6 +164,43 @@ export default function CheckPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function signIn() {
+    const res = await run(() =>
+      api<{ user: PublicUser }>("/api/auth/signin", {
+        method: "POST",
+        body: JSON.stringify({ email: authEmail, password: authPassword }),
+      })
+    );
+    if (res) {
+      setUser(res.user);
+      setAuthPassword("");
+      await refreshProjects();
+      setNotice("Signed in. Your projects are listed below.");
+    }
+  }
+
+  async function signUpAccount() {
+    const res = await run(() =>
+      api<{ user: PublicUser }>("/api/auth/signup", {
+        method: "POST",
+        body: JSON.stringify({ email: authEmail, password: authPassword }),
+      })
+    );
+    if (res) {
+      setUser(res.user);
+      setAuthPassword("");
+      await refreshProjects();
+      setNotice("Account created and signed in. Create your first project below.");
+    }
+  }
+
+  async function signOutAccount() {
+    await run(() => api("/api/auth/signout", { method: "POST" }));
+    setUser(null);
+    await refreshProjects();
+    setNotice("Signed out. You are viewing the public demo project again.");
   }
 
   async function createProject() {
@@ -231,13 +277,20 @@ export default function CheckPage() {
     setDrafts((ds) => ds.map((d, i) => (i === index ? { ...d, ...patch } : d)));
   }
 
+  // Writes follow ownership: a project can only be changed by the
+  // account that owns it. The public demo project is therefore
+  // read-only until you sign in with the demo account.
+  const readOnly =
+    project !== null && (user === null || user.id !== project.ownerId);
+
   return (
     <div className="wrap" style={{ paddingTop: "2rem" }}>
       <h1 style={{ fontSize: "2rem" }}>Scene checker</h1>
       <p style={{ color: "var(--ink-soft)", maxWidth: "70ch" }}>
         Create a project, define its locks, paste a scene, and get a verdict
-        with the exact lines quoted. A demo project is loaded so you can run
-        your first check right away.
+        with the exact lines quoted. The demo project below is readable
+        without an account; sign in to run checks on it and to keep
+        projects of your own.
       </p>
 
       <div className="privacy-note" style={{ margin: "1.25rem 0" }}>
@@ -245,6 +298,60 @@ export default function CheckPage() {
         never stored or logged. We keep only the verdict and the short quoted
         evidence lines it produced, so your history stays useful without
         keeping your draft.
+      </div>
+
+      <div className="panel" style={{ marginBottom: "1.25rem" }}>
+        <h2 style={{ marginTop: 0 }}>Account</h2>
+        {user ? (
+          <div className="row-actions" style={{ alignItems: "center" }}>
+            <span>
+              Signed in as <strong>{user.email}</strong>. Your projects are
+              yours alone: nobody else can read or change them.
+            </span>
+            <button
+              className="action secondary"
+              onClick={signOutAccount}
+              disabled={busy}
+            >
+              Sign out
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="row-actions">
+              <input
+                type="email"
+                placeholder="you@example.com"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                aria-label="Email"
+              />
+              <input
+                type="password"
+                placeholder="Password (8+ characters)"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                aria-label="Password"
+              />
+              <button className="action" onClick={signIn} disabled={busy}>
+                Sign in
+              </button>
+              <button
+                className="action secondary"
+                onClick={signUpAccount}
+                disabled={busy}
+              >
+                Create account
+              </button>
+            </div>
+            <p style={{ color: "var(--ink-soft)", fontSize: "0.94rem" }}>
+              Judges and reviewers: sign in with the demo account{" "}
+              <strong>demo@canonlock.cloud</strong> (password{" "}
+              <strong>canonlock-demo</strong>) to run checks on The Monsoon
+              Draft, or create an account of your own.
+            </p>
+          </>
+        )}
       </div>
 
       {error && <div className="error-box">{error}</div>}
@@ -276,6 +383,14 @@ export default function CheckPage() {
               ))}
             </select>
 
+            {readOnly && project && (
+              <p style={{ color: "var(--ink-soft)", fontSize: "0.94rem" }}>
+                Read-only: this is the public demo project. Sign in with
+                the demo account to run checks on it, or with your own
+                account to work on your own projects.
+              </p>
+            )}
+
             <label className="field" htmlFor="new-name">
               New project name
             </label>
@@ -287,13 +402,17 @@ export default function CheckPage() {
               onChange={(e) => setNewName(e.target.value)}
             />
             <div className="row-actions">
-              <button className="action" onClick={createProject} disabled={busy}>
+              <button
+                className="action"
+                onClick={createProject}
+                disabled={busy || !user}
+              >
                 Create project
               </button>
               <button
                 className="action secondary"
                 onClick={deleteProject}
-                disabled={busy || !project}
+                disabled={busy || !project || readOnly}
               >
                 Delete project
               </button>
@@ -379,7 +498,7 @@ export default function CheckPage() {
               <button
                 className="action"
                 onClick={saveLocks}
-                disabled={busy || !project}
+                disabled={busy || !project || readOnly}
               >
                 Save locks
               </button>
@@ -411,7 +530,9 @@ export default function CheckPage() {
               <button
                 className="action"
                 onClick={runCheck}
-                disabled={busy || !project || scene.trim().length === 0}
+                disabled={
+                  busy || !project || readOnly || scene.trim().length === 0
+                }
               >
                 Run check
               </button>

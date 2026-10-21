@@ -22,6 +22,22 @@ export default function HomePage() {
         </div>
       </section>
 
+      <section className="block" id="accounts">
+        <h2>Accounts are live</h2>
+        <p className="lede">
+          Sign up at the checker and your projects, locks, and check
+          history belong to your account alone: no one else can read or
+          change them. The demo project stays public: readable by
+          everyone, changeable only by its owner.
+        </p>
+        <p>
+          Judges and reviewers: sign in with the demo account{" "}
+          <strong>demo@canonlock.cloud</strong> (password{" "}
+          <strong>canonlock-demo</strong>) to run checks on The Monsoon
+          Draft, or create an account of your own.
+        </p>
+      </section>
+
       <section className="block" id="how">
         <h2>How it works</h2>
         <p className="lede">
