@@ -277,9 +277,9 @@ Every account carries a tier as a real field on the user record
 in test mode (see "Billing (test mode)" above), and the project
 limits below are enforced at project creation.
 
-- **Free**: 1 project, 20 checks/day, scene never stored.
+- **Free**: 1 project, scene never stored.
 - **Writer** ($12/mo): 10 projects, saved lock sets, export, check history.
-- **Studio** ($49/mo): API key, 5 seats, audit log. `POST /v1/check` at
+- **Studio** ($49/mo): unlimited projects, API keys, audit log. `POST /v1/check` at
   $0.02/check after 1,000 included.
 
 ## Privacy and data model

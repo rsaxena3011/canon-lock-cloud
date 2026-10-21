@@ -187,7 +187,7 @@ export default function HomePage() {
             </p>
             <ul>
               <li>1 project</li>
-              <li>20 checks per day</li>
+              <li>No AI in the verdict path</li>
               <li>Scene text never stored</li>
               <li>Full verdict evidence</li>
             </ul>
@@ -201,7 +201,6 @@ export default function HomePage() {
               <li>10 projects</li>
               <li>Saved lock sets</li>
               <li>Check history and report export</li>
-              <li>Priority support</li>
             </ul>
           </div>
           <div className="card">
@@ -211,16 +210,18 @@ export default function HomePage() {
             </p>
             <ul>
               <li>Everything in Writer</li>
-              <li>5 seats</li>
+              <li>Unlimited projects</li>
               <li>API access with your own key</li>
               <li>Audit log</li>
             </ul>
           </div>
         </div>
         <p className="fineprint">
-          Prices in USD. The Free checker is live now; paid tiers open as
-          billing rolls out. API usage beyond the Studio allowance is billed
-          per check.
+          Prices in USD. The Free checker is live now; upgrades run through
+          a test-mode checkout (test card, no real charge) while the
+          production payment provider is integrated. Studio includes the
+          first 1,000 API checks; beyond that, $0.02 per check, metered by
+          the audit log.
         </p>
       </section>
     </div>
