@@ -1,23 +1,21 @@
 import { NextResponse } from "next/server";
+import { gateProject } from "@/lib/auth/server";
 import { checkScene } from "@/lib/matcher/matcher";
-import { store } from "@/lib/store";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function GET(_req: Request, { params }: Ctx) {
   const { id } = await params;
-  if (!store.getProject(id)) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
-  }
-  return NextResponse.json({ checks: store.listChecks(id) });
+  const gate = await gateProject(id, "read");
+  if (!gate.ok) return gate.response;
+  return NextResponse.json({ checks: await gate.store.listChecks(id) });
 }
 
 export async function POST(req: Request, { params }: Ctx) {
   const { id } = await params;
-  const project = store.getProject(id);
-  if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
-  }
+  const gate = await gateProject(id, "mutate");
+  if (!gate.ok) return gate.response;
+  const { project } = gate;
   if (project.locks.length === 0) {
     return NextResponse.json(
       { error: "Define at least one lock before running a check" },
@@ -42,7 +40,7 @@ export async function POST(req: Request, { params }: Ctx) {
   // logged and never stored. Only the verdict and the quoted evidence
   // lines the matcher produces are saved to the check history.
   const result = checkScene(scene, project.locks);
-  const record = store.addCheck(id, {
+  const record = await gate.store.addCheck(id, {
     verdict: result.verdict,
     banner: result.banner,
     rows: result.rows,

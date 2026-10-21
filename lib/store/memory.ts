@@ -1,45 +1,27 @@
-import type { Lock } from "../matcher/matcher";
-import type { CheckRecord, NewCheck, Project, Store } from "./types";
+import type { Lock } from "../matcher/matcher.ts";
+import type {
+  CheckRecord,
+  NewCheck,
+  Project,
+  Session,
+  Store,
+  User,
+} from "./types.ts";
 
 /**
- * DAY-1 STORE: in-memory implementation of the Store interface.
+ * IN-MEMORY STORE: the default Store implementation, used when no
+ * DATABASE_URL is configured.
  *
- * Projects, locks, and check records live in Maps on the server process
- * and are lost on restart. That is deliberate for the first hosted demo:
- * no database credentials exist yet, and none are faked. The next step
- * replaces this class with a Postgres-backed implementation (Supabase or
- * Neon) behind the same interface; nothing else in the app changes.
+ * Users, sessions, projects, locks, and check records live in Maps on
+ * the server process and are lost on restart. That is deliberate for
+ * local development and the first hosted demo: no database credentials
+ * are needed, and none are faked. Set DATABASE_URL and the Postgres
+ * adapter (postgres.ts) takes over behind the same interface.
  *
- * One demo project is seeded so a first-time visitor can run a check
- * immediately. Its locks are the rev. 3 spec examples.
+ * Demo content is NOT seeded here; lib/store/seed.ts seeds the demo
+ * account and its project into whichever store is active, so both
+ * adapters behave identically.
  */
-
-const DEMO_LOCKS: Lock[] = [
-  {
-    name: "Meera's glass",
-    type: "state",
-    must_stay: "empty",
-    found_by: ["glass"],
-    breaks_if: [
-      "full",
-      "filled",
-      "fill",
-      "fills",
-      "refilled",
-      "brim",
-      "brimming",
-      "pours",
-      "poured",
-    ],
-  },
-  {
-    name: "Arjun's coat",
-    type: "attribute",
-    must_stay: "blue",
-    found_by: ["coat"],
-    breaks_if: ["red", "black", "grey", "gray", "green", "brown"],
-  },
-];
 
 function cloneLocks(locks: Lock[]): Lock[] {
   return locks.map((l) => ({
@@ -49,62 +31,122 @@ function cloneLocks(locks: Lock[]): Lock[] {
   }));
 }
 
+function cloneProject(p: Project): Project {
+  return { ...p, locks: cloneLocks(p.locks) };
+}
+
+function cloneRecord(r: CheckRecord): CheckRecord {
+  return { ...r, rows: r.rows.map((row) => ({ ...row, evidence: [...row.evidence] })) };
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 export class InMemoryStore implements Store {
+  private users = new Map<string, User>();
+  private userIdsByEmail = new Map<string, string>();
+  private sessions = new Map<string, Session>(); // by tokenHash
   private projects = new Map<string, Project>();
   private checks = new Map<string, CheckRecord[]>();
 
-  constructor() {
-    const demo: Project = {
+  async createUser(
+    email: string,
+    passwordHash: string
+  ): Promise<User | undefined> {
+    const normalized = normalizeEmail(email);
+    if (this.userIdsByEmail.has(normalized)) return undefined;
+    const user: User = {
       id: crypto.randomUUID(),
-      name: "The Monsoon Draft (demo)",
-      locks: cloneLocks(DEMO_LOCKS),
+      email: normalized,
+      passwordHash,
       createdAt: new Date().toISOString(),
     };
-    this.projects.set(demo.id, demo);
-    this.checks.set(demo.id, []);
+    this.users.set(user.id, user);
+    this.userIdsByEmail.set(normalized, user.id);
+    return { ...user };
   }
 
-  listProjects(): Project[] {
-    return [...this.projects.values()].map((p) => ({
-      ...p,
-      locks: cloneLocks(p.locks),
-    }));
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const id = this.userIdsByEmail.get(normalizeEmail(email));
+    const user = id ? this.users.get(id) : undefined;
+    return user ? { ...user } : undefined;
   }
 
-  getProject(id: string): Project | undefined {
+  async getUserById(id: string): Promise<User | undefined> {
+    const user = this.users.get(id);
+    return user ? { ...user } : undefined;
+  }
+
+  async createSession(session: Session): Promise<void> {
+    this.sessions.set(session.tokenHash, { ...session });
+  }
+
+  async getSession(tokenHash: string): Promise<Session | undefined> {
+    const session = this.sessions.get(tokenHash);
+    return session ? { ...session } : undefined;
+  }
+
+  async deleteSession(tokenHash: string): Promise<boolean> {
+    return this.sessions.delete(tokenHash);
+  }
+
+  async listProjects(ownerId: string): Promise<Project[]> {
+    return [...this.projects.values()]
+      .filter((p) => p.ownerId === ownerId)
+      .map(cloneProject);
+  }
+
+  async getProject(id: string): Promise<Project | undefined> {
     const p = this.projects.get(id);
-    return p ? { ...p, locks: cloneLocks(p.locks) } : undefined;
+    return p ? cloneProject(p) : undefined;
   }
 
-  createProject(name: string): Project {
+  async getDemoProject(): Promise<Project | undefined> {
+    for (const p of this.projects.values()) {
+      if (p.isDemo) return cloneProject(p);
+    }
+    return undefined;
+  }
+
+  async createProject(
+    name: string,
+    ownerId: string,
+    opts?: { isDemo?: boolean }
+  ): Promise<Project> {
     const project: Project = {
       id: crypto.randomUUID(),
+      ownerId,
       name,
+      isDemo: opts?.isDemo ?? false,
       locks: [],
       createdAt: new Date().toISOString(),
     };
     this.projects.set(project.id, project);
     this.checks.set(project.id, []);
-    return { ...project, locks: [] };
+    return cloneProject(project);
   }
 
-  deleteProject(id: string): boolean {
+  async deleteProject(id: string): Promise<boolean> {
     this.checks.delete(id);
     return this.projects.delete(id);
   }
 
-  setLocks(id: string, locks: Lock[]): Project | undefined {
+  async setLocks(id: string, locks: Lock[]): Promise<Project | undefined> {
     const p = this.projects.get(id);
     if (!p) return undefined;
     p.locks = cloneLocks(locks);
-    return { ...p, locks: cloneLocks(p.locks) };
+    return cloneProject(p);
   }
 
-  listChecks(projectId: string): CheckRecord[] {
-    return [...(this.checks.get(projectId) ?? [])].reverse();
+  async listChecks(projectId: string): Promise<CheckRecord[]> {
+    return [...(this.checks.get(projectId) ?? [])].reverse().map(cloneRecord);
   }
 
-  addCheck(projectId: string, check: NewCheck): CheckRecord | undefined {
+  async addCheck(
+    projectId: string,
+    check: NewCheck
+  ): Promise<CheckRecord | undefined> {
     if (!this.projects.has(projectId)) return undefined;
     const record: CheckRecord = {
       id: crypto.randomUUID(),
@@ -115,6 +157,6 @@ export class InMemoryStore implements Store {
       rows: check.rows.map((r) => ({ ...r, evidence: [...r.evidence] })),
     };
     this.checks.get(projectId)!.push(record);
-    return record;
+    return cloneRecord(record);
   }
 }

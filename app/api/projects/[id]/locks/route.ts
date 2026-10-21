@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { gateProject } from "@/lib/auth/server";
 import type { Lock } from "@/lib/matcher/matcher";
-import { store } from "@/lib/store";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -22,6 +22,8 @@ function isLock(value: unknown): value is Lock {
 
 export async function PUT(req: Request, { params }: Ctx) {
   const { id } = await params;
+  const gate = await gateProject(id, "mutate");
+  if (!gate.ok) return gate.response;
   let body: unknown;
   try {
     body = await req.json();
@@ -44,7 +46,7 @@ export async function PUT(req: Request, { params }: Ctx) {
       { status: 400 }
     );
   }
-  const project = store.setLocks(id, locks as Lock[]);
+  const project = await gate.store.setLocks(id, locks as Lock[]);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
