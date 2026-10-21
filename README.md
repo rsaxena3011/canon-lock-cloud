@@ -6,8 +6,8 @@ you wrote do not move. ALLOW / BLOCK / REVIEW, with the exact line quoted.
 Built for [Galuxium Nexus V2](https://galuxium-nexus-v2-29411.devpost.com/).
 
 Executive briefing: [EXECUTIVE_BRIEFING.md](EXECUTIVE_BRIEFING.md)
-(DRAFT v1, pending review): problem, differentiation, architecture,
-governance, monetization, honest validation, and roadmap.
+(v2): problem, differentiation, architecture, governance, monetization,
+honest validation, and roadmap.
 
 ## How it works
 
