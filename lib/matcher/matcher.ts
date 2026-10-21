@@ -1,5 +1,5 @@
 /**
- * Canon Lock matcher — TypeScript port of the rev. 3 reference implementation
+ * Canon Lock matcher: TypeScript port of the rev. 3 reference implementation
  * (verify-v3.py). Implements PRD rev. 3 section 7 (normative) exactly.
  *
  * Deterministic: same locks + same scene always produce the same verdict.
