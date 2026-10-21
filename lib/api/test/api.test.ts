@@ -163,6 +163,19 @@ async function accountWithKey(tier?: "Free" | "Writer" | "Studio") {
   });
   check(malformed.status === 400, "v1-adhoc-malformed-lock-400");
 
+  // An empty find-phrase used to pass validation and throw inside the
+  // matcher (defect #18); it must be a clean 400, and audited.
+  const emptyFind = await handleV1Check(store, limiter(), secret, {
+    locks: [{ ...LOCK, found_by: [] }],
+    scene: SCENE_ALLOW,
+  });
+  check(emptyFind.status === 400, "v1-adhoc-empty-found-by-400");
+  const blankFind = await handleV1Check(store, limiter(), secret, {
+    locks: [{ ...LOCK, found_by: ["   "] }],
+    scene: SCENE_ALLOW,
+  });
+  check(blankFind.status === 400, "v1-adhoc-blank-found-by-400");
+
   const noTarget = await handleV1Check(store, limiter(), secret, {
     scene: SCENE_ALLOW,
   });

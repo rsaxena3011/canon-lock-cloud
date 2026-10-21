@@ -92,7 +92,18 @@ export async function completeBillingSession(
   }
   const updated =
     (await store.setBillingSessionStatus(id, "complete")) ?? session;
-  await store.setUserTier(user.id, session.tier);
+  // Never downgrade on completion: a checkout opened earlier for a
+  // lower tier must not pull an account back down if it completes
+  // after a higher-tier checkout (Sol probe, defect #17). The tier
+  // comparison reads the CURRENT stored tier, not the caller's
+  // possibly stale snapshot. The session still completes and is
+  // audited; the tier only ever moves up here.
+  const RANK: Record<string, number> = { Free: 0, Writer: 1, Studio: 2 };
+  const current = await store.getUserById(user.id);
+  const currentTier = current?.tier ?? user.tier;
+  if ((RANK[session.tier] ?? 0) > (RANK[currentTier] ?? 0)) {
+    await store.setUserTier(user.id, session.tier);
+  }
   await store.addAuditEntry({
     keyId: null,
     userId: user.id,

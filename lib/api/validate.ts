@@ -14,14 +14,20 @@ export function isLock(value: unknown): value is Lock {
   const l = value as Record<string, unknown>;
   const isStringList = (v: unknown): v is string[] =>
     Array.isArray(v) && v.every((x) => typeof x === "string");
+  const isNonBlankList = (v: unknown): v is string[] =>
+    isStringList(v) && v.every((x) => x.trim().length > 0);
   return (
     typeof l.name === "string" &&
     l.name.trim().length > 0 &&
     (l.type === "state" || l.type === "attribute") &&
     typeof l.must_stay === "string" &&
     l.must_stay.trim().length > 0 &&
-    isStringList(l.found_by) &&
-    isStringList(l.breaks_if)
+    // found_by must name at least one real word: an empty find-phrase
+    // used to pass validation and then throw inside the matcher, which
+    // also skipped the audit write (defect #18, Sol review 2026-10-22).
+    isNonBlankList(l.found_by) &&
+    l.found_by.length > 0 &&
+    isNonBlankList(l.breaks_if)
   );
 }
 

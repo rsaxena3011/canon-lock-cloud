@@ -1,0 +1,6 @@
+# C090 quantified-problem measurement (2026-10-22, by Doom)
+Scene: measurement/scene.txt, 24 lines, written for this measurement. Locks: the seeded demo locks (Meera's glass must stay empty; Arjun's coat must stay blue), 9 + 6 break words.
+
+AUTOMATED (checkScene from the shipped matcher, node, this VM): cold run 29.68 ms; median of 50 runs 0.49 ms; max 3.08 ms. Verdict BLOCK; glass row BROKEN quoting line 11 ("filled the glass to the brim"); coat row HOLDS quoting line 3 ("blue coat"). Script: measurement/time_check.mjs.
+
+MANUAL (evaluator pass by eye, every line against both locks, written out in measurement/manual_pass.md): wall time 14.0 s (timestamps 1792608749.74 to 1792608763.79). Verdicts: glass BROKEN at line 11, coat HOLDS, overall BLOCK. FULL AGREEMENT with the matcher on verdict and on both evidence lines. Method caveats: the evaluator composed the scene (knew the plant), so this time UNDERSTATES a cold reader's pass; and an AI evaluator's reading speed is not a human writer's. For that reason the briefing does NOT use the 14 s figure. It uses (a) the workload count: 24 lines x 2 locks = 48 comparisons for one short scene, scaling linearly (a 300-line chapter against 12 locks is 3,600 comparisons, repeated after every regeneration), and (b) the measured machine time: about half a millisecond, median of 50 runs.

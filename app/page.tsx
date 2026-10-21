@@ -171,6 +171,15 @@ export default function HomePage() {
               Name the owner in the find-words to keep rows clean.
             </p>
           </div>
+          <div className="card">
+            <h3>Matching is per line, not per clause</h3>
+            <p>
+              Find-words and break-words are matched on the same line. Two
+              sentences sharing one line can cross-trigger: a break word
+              aimed at a different object on that line can block this lock.
+              One sentence per line keeps verdicts cleanest.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -187,6 +196,7 @@ export default function HomePage() {
             </p>
             <ul>
               <li>1 project</li>
+              <li>Saved lock sets, check history, report export</li>
               <li>No AI in the verdict path</li>
               <li>Scene text never stored</li>
               <li>Full verdict evidence</li>
@@ -198,9 +208,8 @@ export default function HomePage() {
               $12<small> / month</small>
             </p>
             <ul>
+              <li>Everything in Free</li>
               <li>10 projects</li>
-              <li>Saved lock sets</li>
-              <li>Check history and report export</li>
             </ul>
           </div>
           <div className="card">

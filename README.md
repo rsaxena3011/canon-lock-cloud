@@ -19,7 +19,7 @@ honest validation, and roadmap.
 
 The matcher is **deterministic**: same locks + same scene = same verdict, every
 time. No AI in the verdict path. No guessing. Evidence is quoted
-character-for-character with line numbers.
+verbatim (edge whitespace trimmed) with line numbers.
 
 ## Status
 
@@ -239,11 +239,13 @@ with the 1-project limit) and upgrade it, or use "Cancel plan" on
 the demo account to drop it to Free and then upgrade it again. Both
 paths take under a minute.
 
-The provider lives behind a seam (`lib/billing/provider.ts`), so a
-production provider (the Polar / Lemon Squeezy / Dodo class) can
-replace the test provider without touching the routes, the checkout
-page, or the tier logic: its webhook would resolve to the same
-server-side session completion.
+The provider lives behind a seam (`lib/billing/provider.ts`): the
+checkout page, session lifecycle, and tier logic talk to the seam, not
+to a provider. Treat the seam as an integration boundary rather than a
+finished swap: a production provider (the Polar / Lemon Squeezy /
+Dodo class) also brings signed payment notifications, renewal and
+failed-renewal handling, and reconciliation, none of which test mode
+exercises.
 
 ## Data model
 
@@ -277,10 +279,15 @@ Every account carries a tier as a real field on the user record
 in test mode (see "Billing (test mode)" above), and the project
 limits below are enforced at project creation.
 
-- **Free**: 1 project, scene never stored.
-- **Writer** ($12/mo): 10 projects, saved lock sets, export, check history.
-- **Studio** ($49/mo): unlimited projects, API keys, audit log. `POST /v1/check` at
-  $0.02/check after 1,000 included.
+- **Free**: 1 project, the full checker (saved lock sets, export, check
+  history), scene never stored.
+- **Writer** ($12/mo): 10 projects.
+- **Studio** ($49/mo): unlimited projects, API keys, audit log. The API
+  gates are enforced, not just listed: key creation, `POST /v1/check`,
+  and the audit-log view all refuse accounts below Studio with a 403,
+  and a key stops working when its account leaves Studio. Studio
+  pricing includes 1,000 `POST /v1/check` calls per billing period,
+  then $0.02/check (pricing model; metering is the audit log).
 
 ## Privacy and data model
 

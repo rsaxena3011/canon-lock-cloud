@@ -3,7 +3,7 @@
  * (verify-v3.py). Implements PRD rev. 3 section 7 (normative) exactly.
  *
  * Deterministic: same locks + same scene always produce the same verdict.
- * No AI, no network, no guessing. Evidence is quoted character-for-character.
+ * No AI, no network, no guessing. Evidence is quoted verbatim (edge whitespace trimmed).
  */
 
 export interface Lock {

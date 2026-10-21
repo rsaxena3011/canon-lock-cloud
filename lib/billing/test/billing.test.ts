@@ -131,6 +131,38 @@ async function auditEvents(store: Store, userId: string) {
   );
 }
 
+// 2b. A stale lower-tier checkout completing after a higher-tier one
+//     must NOT downgrade the account (defect #17, Sol probe).
+{
+  const store = new InMemoryStore();
+  const user = await freshUser(store, "stale@example.com");
+  const writerSession = await createCheckoutSession(store, user, "Writer");
+  const studioSession = await createCheckoutSession(store, user, "Studio");
+  if (!writerSession.ok || !studioSession.ok) {
+    throw new Error("setup: session creation failed");
+  }
+  const doneStudio = await completeBillingSession(
+    store,
+    user,
+    studioSession.value.session.id
+  );
+  check(doneStudio.ok === true, "stale-setup-studio-completes");
+  check(
+    (await store.getUserById(user.id))?.tier === "Studio",
+    "stale-setup-tier-is-studio"
+  );
+  const doneWriter = await completeBillingSession(
+    store,
+    user,
+    writerSession.value.session.id
+  );
+  check(doneWriter.ok === true, "stale-writer-session-still-completes");
+  check(
+    (await store.getUserById(user.id))?.tier === "Studio",
+    "stale-writer-completion-does-not-downgrade"
+  );
+}
+
 // 3. Completion is owner-only and honours session state.
 {
   const store = new InMemoryStore();
