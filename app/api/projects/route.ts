@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth/server";
+import { checkProjectCapacity } from "@/lib/billing/billing";
 import { getStore } from "@/lib/store";
 
 export async function GET() {
@@ -38,6 +39,15 @@ export async function POST(req: Request) {
     );
   }
   const store = await getStore();
+  // Plan gate: Free 1 project, Writer 10, Studio unlimited. The 403
+  // message names the plan and the limit (see lib/billing).
+  const capacity = await checkProjectCapacity(store, user);
+  if (!capacity.ok) {
+    return NextResponse.json(
+      { error: capacity.error },
+      { status: capacity.status }
+    );
+  }
   const project = await store.createProject(name.trim().slice(0, 120), user.id);
   return NextResponse.json({ project }, { status: 201 });
 }

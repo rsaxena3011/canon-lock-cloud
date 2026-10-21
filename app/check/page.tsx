@@ -225,6 +225,49 @@ export default function CheckPage() {
     setNotice("Signed out. You are viewing the public demo project again.");
   }
 
+  async function startUpgrade(tier: "Writer" | "Studio") {
+    const res = await run(() =>
+      api<{ redirectUrl: string }>("/api/billing/checkout", {
+        method: "POST",
+        body: JSON.stringify({ tier }),
+      })
+    );
+    if (res) {
+      window.location.href = res.redirectUrl;
+    }
+  }
+
+  async function cancelPlanUi() {
+    if (
+      !window.confirm(
+        "Cancel your plan and return to Free? This takes effect immediately (test mode)."
+      )
+    ) {
+      return;
+    }
+    const res = await run(() =>
+      api<{ user: PublicUser }>("/api/billing/cancel-plan", {
+        method: "POST",
+      })
+    );
+    if (res) {
+      setUser(res.user);
+      setNotice("Plan cancelled. You are on the Free plan now (test mode).");
+    }
+  }
+
+  // Returning from the test-mode checkout page: report the outcome.
+  useEffect(() => {
+    const outcome = new URLSearchParams(window.location.search).get("billing");
+    if (outcome === "success") {
+      setNotice(
+        "Plan upgraded in test mode. No real charge was made; card data was never stored."
+      );
+    } else if (outcome === "cancelled") {
+      setNotice("Checkout cancelled. Your plan did not change.");
+    }
+  }, []);
+
   async function createKey() {
     if (newKeyName.trim().length === 0) {
       setError("Give the key a name first");
@@ -358,20 +401,65 @@ export default function CheckPage() {
       <div className="panel" style={{ marginBottom: "1.25rem" }}>
         <h2 style={{ marginTop: 0 }}>Account</h2>
         {user ? (
-          <div className="row-actions" style={{ alignItems: "center" }}>
-            <span>
-              Signed in as <strong>{user.email}</strong> (plan:{" "}
-              <strong>{user.tier}</strong>). Your projects are yours alone:
-              nobody else can read or change them.
-            </span>
-            <button
-              className="action secondary"
-              onClick={signOutAccount}
-              disabled={busy}
-            >
-              Sign out
-            </button>
-          </div>
+          <>
+            <div className="row-actions" style={{ alignItems: "center" }}>
+              <span>
+                Signed in as <strong>{user.email}</strong> (plan:{" "}
+                <strong>{user.tier}</strong>). Your projects are yours alone:
+                nobody else can read or change them.
+              </span>
+              <button
+                className="action secondary"
+                onClick={signOutAccount}
+                disabled={busy}
+              >
+                Sign out
+              </button>
+            </div>
+            <div style={{ marginTop: "0.9rem" }}>
+              <span className="chip chip-review">TEST MODE billing</span>
+              <span
+                style={{
+                  color: "var(--ink-soft)",
+                  fontSize: "0.94rem",
+                  marginLeft: "0.5rem",
+                }}
+              >
+                Upgrades run through a simulated checkout: no real charge,
+                no card data stored. Project limits by plan: Free 1,
+                Writer 10, Studio unlimited.
+              </span>
+              <div className="row-actions" style={{ marginTop: "0.6rem" }}>
+                {user.tier === "Free" && (
+                  <button
+                    className="action"
+                    onClick={() => startUpgrade("Writer")}
+                    disabled={busy}
+                  >
+                    Upgrade to Writer ($12/mo)
+                  </button>
+                )}
+                {user.tier !== "Studio" && (
+                  <button
+                    className="action"
+                    onClick={() => startUpgrade("Studio")}
+                    disabled={busy}
+                  >
+                    Upgrade to Studio ($49/mo)
+                  </button>
+                )}
+                {user.tier !== "Free" && (
+                  <button
+                    className="action secondary"
+                    onClick={cancelPlanUi}
+                    disabled={busy}
+                  >
+                    Cancel plan (back to Free)
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
         ) : (
           <>
             <div className="row-actions">
