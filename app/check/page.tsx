@@ -110,6 +110,23 @@ function resultClass(result: string): string {
 
 export default function CheckPage() {
   const [projects, setProjects] = useState<Project[]>([]);
+  // Inline two-step confirm for destructive actions: the first click
+  // arms the button ("Click again to confirm"), the second runs it.
+  // Native window.confirm dialogs are avoided on purpose: they block
+  // automation, screen recording, and any embedded webview.
+  const [armed, setArmed] = useState<string | null>(null);
+  function armOrRun(id: string, fn: () => void) {
+    if (armed === id) {
+      setArmed(null);
+      fn();
+    } else {
+      setArmed(id);
+      window.setTimeout(
+        () => setArmed((a) => (a === id ? null : a)),
+        4000,
+      );
+    }
+  }
   const [project, setProject] = useState<Project | null>(null);
   const [newName, setNewName] = useState("");
   const [drafts, setDrafts] = useState<LockDraft[]>([]);
@@ -238,13 +255,6 @@ export default function CheckPage() {
   }
 
   async function cancelPlanUi() {
-    if (
-      !window.confirm(
-        "Cancel your plan and return to Free? This takes effect immediately (test mode)."
-      )
-    ) {
-      return;
-    }
     const res = await run(() =>
       api<{ user: PublicUser }>("/api/billing/cancel-plan", {
         method: "POST",
@@ -289,9 +299,6 @@ export default function CheckPage() {
   }
 
   async function revokeKey(key: PublicApiKey) {
-    if (!window.confirm(`Revoke API key "${key.name}"? It stops working immediately.`)) {
-      return;
-    }
     const res = await run(() =>
       api<{ revoked: boolean }>(`/api/keys/${key.id}`, { method: "DELETE" })
     );
@@ -321,9 +328,6 @@ export default function CheckPage() {
 
   async function deleteProject() {
     if (!project) return;
-    if (!window.confirm(`Delete project "${project.name}" and its history?`)) {
-      return;
-    }
     const id = project.id;
     const ok = await run(() =>
       api<{ deleted: boolean }>(`/api/projects/${id}`, { method: "DELETE" })
@@ -451,10 +455,14 @@ export default function CheckPage() {
                 {user.tier !== "Free" && (
                   <button
                     className="action secondary"
-                    onClick={cancelPlanUi}
+                    onClick={() =>
+                      armOrRun("cancel-plan", () => void cancelPlanUi())
+                    }
                     disabled={busy}
                   >
-                    Cancel plan (back to Free)
+                    {armed === "cancel-plan"
+                      ? "Click again to confirm cancel"
+                      : "Cancel plan (back to Free)"}
                   </button>
                 )}
               </div>
@@ -548,10 +556,12 @@ export default function CheckPage() {
               {!k.revoked && (
                 <button
                   className="mini"
-                  onClick={() => revokeKey(k)}
+                  onClick={() =>
+                    armOrRun(`revoke-${k.id}`, () => void revokeKey(k))
+                  }
                   disabled={busy}
                 >
-                  Revoke
+                  {armed === `revoke-${k.id}` ? "Confirm revoke" : "Revoke"}
                 </button>
               )}
             </div>
@@ -628,10 +638,14 @@ export default function CheckPage() {
               </button>
               <button
                 className="action secondary"
-                onClick={deleteProject}
+                onClick={() =>
+                  armOrRun("delete-project", () => void deleteProject())
+                }
                 disabled={busy || !project || readOnly}
               >
-                Delete project
+                {armed === "delete-project"
+                  ? "Click again to confirm delete"
+                  : "Delete project"}
               </button>
             </div>
           </div>
