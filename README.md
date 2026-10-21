@@ -5,6 +5,10 @@ you wrote do not move. ALLOW / BLOCK / REVIEW, with the exact line quoted.
 
 Built for [Galuxium Nexus V2](https://galuxium-nexus-v2-29411.devpost.com/).
 
+Executive briefing: [EXECUTIVE_BRIEFING.md](EXECUTIVE_BRIEFING.md)
+(DRAFT v1, pending review): problem, differentiation, architecture,
+governance, monetization, honest validation, and roadmap.
+
 ## How it works
 
 1. Define **locks**: facts that must not change (e.g. "Meera's glass stays empty").
@@ -34,6 +38,10 @@ Working today:
   from the account panel on `/check`. See "Public API" below.
 - Accounts carry a tier (Free / Writer / Studio) as a real field, so
   plan gates have a seam to check. The seeded demo account is Studio.
+- Test-mode billing: plan upgrades run through a real checkout
+  lifecycle (server-side sessions, an in-app checkout page, audited
+  tier changes) against a test provider, and project limits per plan
+  are enforced. See "Billing (test mode)" below. No real money moves.
 - Two storage adapters behind one async `Store` interface:
   - **In-memory** (default): zero setup, data lasts for the life of the
     server process, and the code says so in its own header.
@@ -43,8 +51,9 @@ Working today:
 
 Next, in order:
 
-1. Test-mode billing for the Writer and Studio tiers, with plan gates
-   enforced against the tier field.
+1. A production payment provider behind the billing provider seam
+   (lib/billing), replacing the test provider without touching the
+   checkout routes or pages.
 
 ## Demo account
 
@@ -64,7 +73,9 @@ seeded idempotently into whichever store is active at server start.
 
 - `app/`: Next.js App Router pages and API routes (landing, `/check`,
   `/api/auth/*`, `/api/projects` and friends, `/api/keys`,
-  `/api/audit`, and the public `/v1/check`).
+  `/api/audit`, the billing routes under `/api/billing/*` plus the
+  checkout page at `/billing/checkout/[id]`, and the public
+  `/v1/check`).
 - `lib/matcher/`: the deterministic matching engine, a TypeScript port of
   the PRD rev. 3 reference implementation. Zero dependencies; runs in the
   browser and on the server. Its smoke suite lives in `lib/matcher/test`.
@@ -79,6 +90,11 @@ seeded idempotently into whichever store is active at server start.
   fixed-window rate limiter (`ratelimit.ts`), ad-hoc lock validation
   (`validate.ts`), and the whole `POST /v1/check` handler (`check.ts`),
   with its suite in `lib/api/test`.
+- `lib/billing/`: the monetization layer, also framework-free: the
+  plan catalogue and prices (`plans.ts`), the provider seam with the
+  test provider (`provider.ts`), and the checkout lifecycle, plan
+  cancellation, and project-capacity gate (`billing.ts`), with its
+  suite in `lib/billing/test`.
 - `lib/report.ts`: report export as JSON or Markdown.
 - `db/`: `schema.sql` (the Postgres schema, identical to the copy the
   adapter applies on boot) and `migrate.ts` (an idempotent runner for
@@ -91,7 +107,7 @@ Requires Node.js 20 or newer.
 ```bash
 npm install
 npm run dev     # http://localhost:3000, checker at /check
-npm test        # matcher smoke + store + auth + Postgres parity suites
+npm test        # matcher, store, auth, Postgres parity, API, billing
 npm run build   # production build
 ```
 
@@ -183,9 +199,55 @@ id, account id, project id if any, verdict, and HTTP status. No scene
 text, no raw key. Read your own account's entries, newest first, at
 `GET /api/audit` (session cookie; `?limit=` up to 200).
 
+## Billing (test mode)
+
+The mandatory deliverable is a monetization engine with a working
+test-mode checkout, so billing is a real subsystem, not a pricing
+page with dead buttons. It runs against a **test provider**: no real
+charges are taken, no external payment account is involved, and no
+card data is stored anywhere (there is no card column in the schema;
+the checkout form's values are never persisted).
+
+How a plan change happens, end to end:
+
+1. Sign in, open the account panel on `/check`, and choose an Upgrade
+   button (Writer $12/mo or Studio $49/mo).
+2. `POST /api/billing/checkout` creates a server-side checkout
+   session in the `billing_sessions` table, owned by your account,
+   and hands back the in-app checkout page
+   (`/billing/checkout/[id]`).
+3. On that page, under a TEST MODE banner, use the test card
+   (4242 4242 4242 4242, any future expiry, any CVC) and Pay. The
+   server completes the session, upgrades your tier immediately, and
+   writes a `billing_checkout_complete` entry to the audit log.
+4. "Cancel plan" in the account panel returns the account to Free at
+   any time, also audited (`billing_plan_cancelled`). Cancelling a
+   checkout before paying marks the session cancelled and never
+   touches the tier.
+
+Rules enforced on the server, not in the UI: a session can be
+completed only by its owner and only while it is open; completing
+twice is a no-op (replay cannot double-charge or double-upgrade);
+checkout only moves upward (same-tier and downward purchases are
+refused); and project creation enforces the plan limits, Free 1,
+Writer 10, Studio unlimited, with a 403 whose message names the plan
+and the limit.
+
+**Judge note:** the seeded demo account is already Studio. To walk
+the upgrade path, either create a fresh account (it starts on Free,
+with the 1-project limit) and upgrade it, or use "Cancel plan" on
+the demo account to drop it to Free and then upgrade it again. Both
+paths take under a minute.
+
+The provider lives behind a seam (`lib/billing/provider.ts`), so a
+production provider (the Polar / Lemon Squeezy / Dodo class) can
+replace the test provider without touching the routes, the checkout
+page, or the tier logic: its webhook would resolve to the same
+server-side session completion.
+
 ## Data model
 
-Six tables (see `db/schema.sql`):
+Seven tables (see `db/schema.sql`):
 
 - `users`: id, normalized email (unique), scrypt password hash, tier
   (Free / Writer / Studio, default Free), created_at.
@@ -198,15 +260,22 @@ Six tables (see `db/schema.sql`):
   display prefix, created_at, last_used_at, revoked flag. The raw key
   is never stored.
 - `audit_log`: id, created_at, key id, account id, project id, verdict,
-  HTTP status. Routing metadata only: no scene text, no raw keys. It
-  deliberately has no foreign keys, so the trail survives deletion of
-  the project or key it references.
+  HTTP status, and an event column that is null for API checks and
+  names billing events (`billing_checkout_complete`,
+  `billing_plan_cancelled`). Routing metadata only: no scene text, no
+  raw keys. It deliberately has no foreign keys, so the trail survives
+  deletion of the project or key it references.
+- `billing_sessions`: id, account id, target tier, price in cents,
+  status (open / complete / cancelled), created_at, updated_at,
+  completed_at. No card data exists in the schema: test mode never
+  collects any worth storing.
 
 ## Tiers
 
 Every account carries a tier as a real field on the user record
-(default Free; the seeded demo account is Studio). Checkout is not
-built yet; the field is the seam the billing increment will gate on.
+(default Free; the seeded demo account is Studio). Checkout is built
+in test mode (see "Billing (test mode)" above), and the project
+limits below are enforced at project creation.
 
 - **Free**: 1 project, 20 checks/day, scene never stored.
 - **Writer** ($12/mo): 10 projects, saved lock sets, export, check history.
