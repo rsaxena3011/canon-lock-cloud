@@ -1,5 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { Project, PublicUser, Session, Store } from "../store/types.ts";
+import type {
+  Project,
+  PublicUser,
+  Session,
+  Store,
+  User,
+} from "../store/types.ts";
 import { hashPassword, verifyPassword } from "./password.ts";
 
 /**
@@ -49,8 +55,8 @@ async function startSession(store: Store, userId: string): Promise<string> {
   return token;
 }
 
-function toPublic(user: { id: string; email: string }): PublicUser {
-  return { id: user.id, email: user.email };
+function toPublic(user: User): PublicUser {
+  return { id: user.id, email: user.email, tier: user.tier };
 }
 
 export async function signUp(

@@ -1,9 +1,16 @@
 import type { CheckRow, Lock, Verdict } from "../matcher/matcher.ts";
 
+/** Subscription tier. A real field on the user record so plan gates
+ * (billing, API access) have a seam to check; checkout lives elsewhere. */
+export type Tier = "Free" | "Writer" | "Studio";
+
+export const TIERS: Tier[] = ["Free", "Writer", "Studio"];
+
 export interface User {
   id: string;
   email: string; // stored normalized: trimmed and lowercased
   passwordHash: string; // scrypt hash string, never the plain password
+  tier: Tier; // defaults to "Free" at sign-up
   createdAt: string; // ISO 8601
 }
 
@@ -11,6 +18,7 @@ export interface User {
 export interface PublicUser {
   id: string;
   email: string;
+  tier: Tier;
 }
 
 export interface Session {
@@ -52,6 +60,69 @@ export interface NewCheck {
 }
 
 /**
+ * An API key for the public POST /v1/check endpoint. Only the SHA-256
+ * hash of the key is ever stored; the raw key is shown to its owner
+ * exactly once, at creation. `prefix` is the short display fragment
+ * (for example "clc_live_ab12cd34") that is safe to list in the UI.
+ */
+export interface ApiKey {
+  id: string;
+  userId: string; // the account that owns the key
+  name: string;
+  keyHash: string; // SHA-256 hex of the full raw key
+  prefix: string;
+  createdAt: string; // ISO 8601
+  lastUsedAt: string | null; // ISO 8601, null until first use
+  revoked: boolean;
+}
+
+/** The shape of an API key that is safe to send to the client. */
+export interface PublicApiKey {
+  id: string;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revoked: boolean;
+}
+
+export function toPublicApiKey(key: ApiKey): PublicApiKey {
+  return {
+    id: key.id,
+    name: key.name,
+    prefix: key.prefix,
+    createdAt: key.createdAt,
+    lastUsedAt: key.lastUsedAt,
+    revoked: key.revoked,
+  };
+}
+
+/**
+ * One audit-log row for a public API call. Governance: an entry holds
+ * routing metadata only (which key, which account, which project, the
+ * verdict, the HTTP status). It never holds scene text and never holds
+ * the raw API key. Ids are nullable because a call with a missing or
+ * unknown key is still audited, with nothing to attribute it to.
+ */
+export interface AuditEntry {
+  id: string;
+  createdAt: string; // ISO 8601
+  keyId: string | null;
+  userId: string | null;
+  projectId: string | null;
+  verdict: Verdict | null; // null when no check ran (auth/validation failure)
+  statusCode: number;
+}
+
+export interface NewAuditEntry {
+  keyId: string | null;
+  userId: string | null;
+  projectId: string | null;
+  verdict: Verdict | null;
+  statusCode: number;
+}
+
+/**
  * Data access for Canon Lock Cloud. All persistence goes through this
  * interface so the storage engine can change (in-memory by default,
  * Postgres when DATABASE_URL is set) without touching the API routes
@@ -62,9 +133,15 @@ export interface NewCheck {
  */
 export interface Store {
   // Accounts. createUser returns undefined when the email is taken.
-  createUser(email: string, passwordHash: string): Promise<User | undefined>;
+  // New accounts default to the Free tier unless opts.tier says otherwise.
+  createUser(
+    email: string,
+    passwordHash: string,
+    opts?: { tier?: Tier }
+  ): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   getUserById(id: string): Promise<User | undefined>;
+  setUserTier(id: string, tier: Tier): Promise<User | undefined>;
 
   // Server-side sessions, keyed by the hash of the bearer token.
   createSession(session: Session): Promise<void>;
@@ -90,4 +167,17 @@ export interface Store {
     projectId: string,
     check: NewCheck
   ): Promise<CheckRecord | undefined>;
+
+  // API keys. Only hashes are stored (see ApiKey). Revoking is scoped
+  // to the owner so one account cannot revoke another account's key.
+  createApiKey(key: ApiKey): Promise<ApiKey>;
+  listApiKeys(userId: string): Promise<ApiKey[]>;
+  getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined>;
+  revokeApiKey(id: string, userId: string): Promise<boolean>;
+  touchApiKey(id: string, at: string): Promise<void>;
+
+  // Audit log for public API calls. Entries never contain scene text
+  // or raw keys (see AuditEntry).
+  addAuditEntry(entry: NewAuditEntry): Promise<AuditEntry>;
+  listAuditEntries(userId: string, limit?: number): Promise<AuditEntry[]>;
 }

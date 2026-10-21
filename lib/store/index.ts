@@ -3,14 +3,20 @@ import { seedDemo } from "./seed";
 import type { Store } from "./types";
 
 export type {
+  ApiKey,
+  AuditEntry,
   CheckRecord,
+  NewAuditEntry,
   NewCheck,
   Project,
+  PublicApiKey,
   PublicUser,
   Session,
   Store,
+  Tier,
   User,
 } from "./types";
+export { toPublicApiKey } from "./types";
 
 // One store per server process, created lazily and seeded with the
 // demo account and demo project. Kept on globalThis so Next.js module

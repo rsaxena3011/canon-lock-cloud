@@ -1,10 +1,14 @@
 import type { Lock } from "../matcher/matcher.ts";
 import type {
+  ApiKey,
+  AuditEntry,
   CheckRecord,
+  NewAuditEntry,
   NewCheck,
   Project,
   Session,
   Store,
+  Tier,
   User,
 } from "./types.ts";
 
@@ -49,10 +53,14 @@ export class InMemoryStore implements Store {
   private sessions = new Map<string, Session>(); // by tokenHash
   private projects = new Map<string, Project>();
   private checks = new Map<string, CheckRecord[]>();
+  private apiKeys = new Map<string, ApiKey>(); // by id
+  private apiKeyIdsByHash = new Map<string, string>();
+  private audit: AuditEntry[] = [];
 
   async createUser(
     email: string,
-    passwordHash: string
+    passwordHash: string,
+    opts?: { tier?: Tier }
   ): Promise<User | undefined> {
     const normalized = normalizeEmail(email);
     if (this.userIdsByEmail.has(normalized)) return undefined;
@@ -60,6 +68,7 @@ export class InMemoryStore implements Store {
       id: crypto.randomUUID(),
       email: normalized,
       passwordHash,
+      tier: opts?.tier ?? "Free",
       createdAt: new Date().toISOString(),
     };
     this.users.set(user.id, user);
@@ -76,6 +85,13 @@ export class InMemoryStore implements Store {
   async getUserById(id: string): Promise<User | undefined> {
     const user = this.users.get(id);
     return user ? { ...user } : undefined;
+  }
+
+  async setUserTier(id: string, tier: Tier): Promise<User | undefined> {
+    const user = this.users.get(id);
+    if (!user) return undefined;
+    user.tier = tier;
+    return { ...user };
   }
 
   async createSession(session: Session): Promise<void> {
@@ -158,5 +174,56 @@ export class InMemoryStore implements Store {
     };
     this.checks.get(projectId)!.push(record);
     return cloneRecord(record);
+  }
+
+  async createApiKey(key: ApiKey): Promise<ApiKey> {
+    this.apiKeys.set(key.id, { ...key });
+    this.apiKeyIdsByHash.set(key.keyHash, key.id);
+    return { ...key };
+  }
+
+  async listApiKeys(userId: string): Promise<ApiKey[]> {
+    return [...this.apiKeys.values()]
+      .filter((k) => k.userId === userId)
+      .map((k) => ({ ...k }));
+  }
+
+  async getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined> {
+    const id = this.apiKeyIdsByHash.get(keyHash);
+    const key = id ? this.apiKeys.get(id) : undefined;
+    return key ? { ...key } : undefined;
+  }
+
+  async revokeApiKey(id: string, userId: string): Promise<boolean> {
+    const key = this.apiKeys.get(id);
+    if (!key || key.userId !== userId || key.revoked) return false;
+    key.revoked = true;
+    return true;
+  }
+
+  async touchApiKey(id: string, at: string): Promise<void> {
+    const key = this.apiKeys.get(id);
+    if (key) key.lastUsedAt = at;
+  }
+
+  async addAuditEntry(entry: NewAuditEntry): Promise<AuditEntry> {
+    const row: AuditEntry = {
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      ...entry,
+    };
+    this.audit.push(row);
+    return { ...row };
+  }
+
+  async listAuditEntries(
+    userId: string,
+    limit = 50
+  ): Promise<AuditEntry[]> {
+    return this.audit
+      .filter((e) => e.userId === userId)
+      .slice(-limit)
+      .reverse()
+      .map((e) => ({ ...e }));
   }
 }

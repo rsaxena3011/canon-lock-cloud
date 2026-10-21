@@ -131,5 +131,77 @@ const LOCK: Lock = {
   );
 }
 
+// 5. Tiers: default Free, explicit tier at creation, setUserTier.
+{
+  const store = new InMemoryStore();
+  const free = await store.createUser("free@example.com", "h");
+  check(free?.tier === "Free", "tier-defaults-to-free");
+  const studio = await store.createUser("studio@example.com", "h", {
+    tier: "Studio",
+  });
+  check(studio?.tier === "Studio", "tier-set-at-creation");
+  const upgraded = await store.setUserTier(free!.id, "Writer");
+  check(upgraded?.tier === "Writer", "tier-updated");
+  check((await store.getUserById(free!.id))?.tier === "Writer", "tier-persists-on-user");
+  check((await store.setUserTier("missing", "Studio")) === undefined, "tier-missing-user-undefined");
+}
+
+// 6. API keys and audit log: hash-only storage, owner scoping, revoke.
+{
+  const store = new InMemoryStore();
+  const owner = (await store.createUser("keys@example.com", "h"))!;
+  const other = (await store.createUser("other@example.com", "h"))!;
+  const created = await store.createApiKey({
+    id: "key-1",
+    userId: owner.id,
+    name: "First key",
+    keyHash: "sha256-of-the-secret",
+    prefix: "clc_live_ab12cd34",
+    createdAt: new Date().toISOString(),
+    lastUsedAt: null,
+    revoked: false,
+  });
+  check(created.lastUsedAt === null && created.revoked === false, "apikey-created-shape");
+  check(
+    (await store.getApiKeyByHash("sha256-of-the-secret"))?.id === "key-1",
+    "apikey-lookup-by-hash"
+  );
+  check((await store.getApiKeyByHash("nope")) === undefined, "apikey-unknown-hash-undefined");
+  check((await store.listApiKeys(owner.id)).length === 1, "apikey-list-owner");
+  check((await store.listApiKeys(other.id)).length === 0, "apikey-list-other-empty");
+  await store.touchApiKey("key-1", "2026-10-21T00:00:00.000Z");
+  check(
+    (await store.getApiKeyByHash("sha256-of-the-secret"))?.lastUsedAt ===
+      "2026-10-21T00:00:00.000Z",
+    "apikey-touch-sets-last-used"
+  );
+  check((await store.revokeApiKey("key-1", other.id)) === false, "apikey-revoke-wrong-owner-false");
+  check((await store.revokeApiKey("key-1", owner.id)) === true, "apikey-revoke-owner-true");
+  check(
+    (await store.getApiKeyByHash("sha256-of-the-secret"))?.revoked === true,
+    "apikey-revoked-flag-stored"
+  );
+
+  const entry = await store.addAuditEntry({
+    keyId: "key-1",
+    userId: owner.id,
+    projectId: "p1",
+    verdict: "BLOCK",
+    statusCode: 200,
+  });
+  check(entry.verdict === "BLOCK" && entry.projectId === "p1", "audit-entry-round-trip");
+  check(!("scene" in entry), "audit-entry-has-no-scene-field");
+  check((await store.listAuditEntries(owner.id)).length === 1, "audit-list-owner");
+  check((await store.listAuditEntries(other.id)).length === 0, "audit-list-other-empty");
+}
+
+// 7. Seed: the demo account is Studio tier.
+{
+  const store = new InMemoryStore();
+  await seedDemo(store);
+  const demoUser = await store.getUserByEmail(DEMO_EMAIL);
+  check(demoUser?.tier === "Studio", "seed-demo-user-is-studio-tier");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

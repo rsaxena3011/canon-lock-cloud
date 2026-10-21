@@ -46,7 +46,14 @@ const DEMO_LOCKS: Lock[] = [
 export async function seedDemo(store: Store): Promise<void> {
   let user = await store.getUserByEmail(DEMO_EMAIL);
   if (!user) {
-    user = await store.createUser(DEMO_EMAIL, hashPassword(DEMO_PASSWORD));
+    // The demo account is Studio tier so judges can exercise the API
+    // key flow and the audit log, not just the web checker.
+    user = await store.createUser(DEMO_EMAIL, hashPassword(DEMO_PASSWORD), {
+      tier: "Studio",
+    });
+  } else if (user.tier !== "Studio") {
+    // An older database may hold the demo account on the default tier.
+    user = (await store.setUserTier(user.id, "Studio")) ?? user;
   }
   if (!user) return; // another process seeded it first; nothing to do
 

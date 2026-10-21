@@ -32,6 +32,8 @@ class FakePool implements PgQueryable {
   private sessions = new Map<string, Row>();
   private projects = new Map<string, Row>();
   private checks: Row[] = [];
+  private apiKeys = new Map<string, Row>();
+  private audit: Row[] = [];
   private seq = 0;
 
   async query(
@@ -39,10 +41,14 @@ class FakePool implements PgQueryable {
     params: unknown[] = []
   ): Promise<{ rows: Row[]; rowCount: number | null }> {
     const sql = text.replace(/\s+/g, " ").trim();
-    const p = params as (string | boolean)[];
+    const p = params as (string | boolean | number)[];
     const empty = { rows: [] as Row[], rowCount: 0 };
 
-    if (sql.startsWith("CREATE TABLE") || sql.startsWith("CREATE INDEX")) {
+    if (
+      sql.startsWith("CREATE TABLE") ||
+      sql.startsWith("CREATE INDEX") ||
+      sql.startsWith("ALTER TABLE")
+    ) {
       return empty;
     }
     if (sql.startsWith("INSERT INTO users")) {
@@ -52,9 +58,16 @@ class FakePool implements PgQueryable {
         id: p[0],
         email: p[1],
         password_hash: p[2],
-        created_at: p[3],
+        tier: p[3],
+        created_at: p[4],
       };
       this.users.set(p[0] as string, row);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (sql.startsWith("UPDATE users SET tier")) {
+      const row = this.users.get(p[0] as string);
+      if (!row) return empty;
+      row.tier = p[1];
       return { rows: [row], rowCount: 1 };
     }
     if (sql.includes("FROM users WHERE email")) {
@@ -144,6 +157,68 @@ class FakePool implements PgQueryable {
         );
       return { rows, rowCount: rows.length };
     }
+    if (sql.startsWith("INSERT INTO api_keys")) {
+      const row: Row = {
+        id: p[0],
+        user_id: p[1],
+        name: p[2],
+        key_hash: p[3],
+        prefix: p[4],
+        created_at: p[5],
+        last_used_at: p[6],
+        revoked: p[7],
+      };
+      this.apiKeys.set(p[0] as string, row);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (sql.includes("FROM api_keys WHERE user_id")) {
+      const rows = [...this.apiKeys.values()].filter(
+        (k) => k.user_id === p[0]
+      );
+      return { rows, rowCount: rows.length };
+    }
+    if (sql.includes("FROM api_keys WHERE key_hash")) {
+      const row = [...this.apiKeys.values()].find(
+        (k) => k.key_hash === p[0]
+      );
+      return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
+    }
+    if (sql.startsWith("UPDATE api_keys SET revoked")) {
+      const row = this.apiKeys.get(p[0] as string);
+      if (!row || row.user_id !== p[1] || row.revoked === true) return empty;
+      row.revoked = true;
+      return { rows: [], rowCount: 1 };
+    }
+    if (sql.startsWith("UPDATE api_keys SET last_used_at")) {
+      const row = this.apiKeys.get(p[0] as string);
+      if (row) row.last_used_at = p[1];
+      return { rows: [], rowCount: row ? 1 : 0 };
+    }
+    if (sql.startsWith("INSERT INTO audit_log")) {
+      const row: Row = {
+        id: p[0],
+        created_at: p[1],
+        key_id: p[2],
+        user_id: p[3],
+        project_id: p[4],
+        verdict: p[5],
+        status_code: p[6],
+        _seq: ++this.seq,
+      };
+      this.audit.push(row);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (sql.includes("FROM audit_log WHERE user_id")) {
+      const rows = this.audit
+        .filter((e) => e.user_id === p[0])
+        .sort(
+          (a, b) =>
+            String(b.created_at).localeCompare(String(a.created_at)) ||
+            Number(b._seq) - Number(a._seq)
+        )
+        .slice(0, Number(p[1]));
+      return { rows, rowCount: rows.length };
+    }
     throw new Error(`FakePool: unhandled SQL: ${sql.slice(0, 100)}`);
   }
 }
@@ -225,6 +300,60 @@ check(true, "schema-applies-against-pool");
   );
   const res = await signIn(store, DEMO_EMAIL, DEMO_PASSWORD);
   check(res.ok === true, "pg-demo-account-signs-in");
+  check(demoUser?.tier === "Studio", "pg-demo-account-is-studio-tier");
+}
+
+// Tiers, API keys, and the audit log: same semantics as in-memory.
+{
+  const free = await store.createUser("tier@pg.dev", "h");
+  check(free?.tier === "Free", "pg-user-default-tier-free");
+  const upgraded = await store.setUserTier(free!.id, "Writer");
+  check(upgraded?.tier === "Writer", "pg-set-user-tier");
+  check((await store.getUserById(free!.id))?.tier === "Writer", "pg-tier-persists");
+  check((await store.setUserTier("missing", "Studio")) === undefined, "pg-set-tier-missing-user");
+
+  const key = await store.createApiKey({
+    id: "k1",
+    userId: free!.id,
+    name: "CI key",
+    keyHash: "hash-of-secret",
+    prefix: "clc_live_ab12cd34",
+    createdAt: new Date().toISOString(),
+    lastUsedAt: null,
+    revoked: false,
+  });
+  check(key.keyHash === "hash-of-secret", "pg-api-key-created");
+  check((await store.getApiKeyByHash("hash-of-secret"))?.id === "k1", "pg-api-key-by-hash");
+  check((await store.listApiKeys(free!.id)).length === 1, "pg-api-keys-listed-for-owner");
+  check((await store.listApiKeys("someone-else")).length === 0, "pg-api-keys-scoped-to-owner");
+  await store.touchApiKey("k1", "2026-10-21T00:00:00.000Z");
+  check(
+    (await store.getApiKeyByHash("hash-of-secret"))?.lastUsedAt === "2026-10-21T00:00:00.000Z",
+    "pg-api-key-touch-updates-last-used"
+  );
+  check((await store.revokeApiKey("k1", "someone-else")) === false, "pg-api-key-revoke-wrong-owner");
+  check((await store.revokeApiKey("k1", free!.id)) === true, "pg-api-key-revoked");
+  check((await store.getApiKeyByHash("hash-of-secret"))?.revoked === true, "pg-api-key-revoke-sticks");
+  check((await store.revokeApiKey("k1", free!.id)) === false, "pg-api-key-revoke-twice-false");
+
+  const e1 = await store.addAuditEntry({
+    keyId: "k1",
+    userId: free!.id,
+    projectId: null,
+    verdict: "ALLOW",
+    statusCode: 200,
+  });
+  await store.addAuditEntry({
+    keyId: null,
+    userId: null,
+    projectId: null,
+    verdict: null,
+    statusCode: 401,
+  });
+  check(e1.statusCode === 200 && e1.verdict === "ALLOW", "pg-audit-entry-written");
+  check(!("scene" in e1) && !("key" in e1), "pg-audit-entry-has-no-scene-or-key");
+  const entries = await store.listAuditEntries(free!.id);
+  check(entries.length === 1 && entries[0].id === e1.id, "pg-audit-listed-for-owner-only");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
